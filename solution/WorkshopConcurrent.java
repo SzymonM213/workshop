@@ -64,58 +64,42 @@ public class WorkshopConcurrent implements Workshop {
     }
 
     public Workplace switchTo(WorkplaceId wid) {
-        boolean giveMutexBack = false;
-        System.out.println("zaczynam switchto powinno być 0 lub 1 " + mutex);
         acquire(mutex);
         int length = 0;
         WorkplaceWrapper newWorkplace = workplaces.get(wid);
         WorkplaceId oldId = workers.get(Thread.currentThread().getId());
         WorkplaceWrapper oldWorkplace = workplaces.get(oldId);
         if (wid == oldId) {
-            System.out.println("podnoszę mutexa " + mutex + Thread.currentThread().getName());
             mutex.release();
             return newWorkplace;
         }
-        if (!newWorkplace.occupied) System.out.println("nikogo nie ma wpierdalam się " + Thread.currentThread().getName());
         if (newWorkplace.occupied) {
             transferWishes.put(oldId, wid);
             newWorkplace.queue.add(oldId);
             length = cycleLength(oldId);
-//            CountDownLatch latch = new CountDownLatch(2);
-//            newWorkplace.waitForNext = latch;
-//            oldWorkplace.waitForPrev = latch;
             if (length > 0) {
                 isCycle = true;
                 CountDownLatch waitForCycle = new CountDownLatch(length);
-                System.out.println("znalazłlem cykl " + waitForCycle.toString() + Thread.currentThread().getName());
                 WorkplaceWrapper whereIAm = newWorkplace;
                 WorkplaceWrapper whereIGo;
                 newWorkplace.queue.remove(oldWorkplace.getId());
                 newWorkplace.waitForPrev = null;
                 newWorkplace.waitForNext = waitForCycle;
-                System.out.println("ustawiam " + newWorkplace.waitForNext + Thread.currentThread().getName());
                 while (whereIAm != oldWorkplace) {
                     whereIGo = workplaces.get(transferWishes.get(whereIAm.getId()));
                     whereIGo.queue.remove(whereIAm.getId());
                     whereIGo.waitForPrev = null;
                     whereIGo.waitForNext = waitForCycle;
-                    System.out.println("czekam na mutexa " + mutex);
                     whereIAm.waitForSwitch.release(); //oddaje tego zjeba mutexa
                     whereIAm = whereIGo;
                     acquire(mutex); // tu trzeba zamienic mutex na inny semafor cycle albo zabawa z isCycle
+                    isCycle = true;
                 }
             }
             else {
                 mutex.release();
-                System.out.println("chuj jebany " + Thread.currentThread().getName());
                 acquire(oldWorkplace.waitForSwitch);
-                System.out.println("jednak nie chuj " + Thread.currentThread().getName());
             }
-//            if(!isCycle) { // normalne zwolnienie stanowiska (bez cyklu)
-//                CountDownLatch latch = new CountDownLatch(2);
-//                newWorkplace.waitForNext = latch;
-//                oldWorkplace.waitForPrev = latch;
-//            }
             transferWishes.remove(oldId);
         }
         workers.remove(Thread.currentThread().getId());
@@ -135,14 +119,10 @@ public class WorkshopConcurrent implements Workshop {
             }
             else {
                 oldWorkplace.occupied = false;
-                System.out.println("podnoszę mutexa " + mutex + Thread.currentThread().getName());
                 mutex.release();
             }
         } else {
-            if (length > 0) {
-                System.out.println("koniec cyklu " + Thread.currentThread().getName());
-                isCycle = false;
-            }
+            isCycle = false;
             mutex.release();
         }
         newWorkplace.occupied = true;
@@ -162,7 +142,6 @@ public class WorkshopConcurrent implements Workshop {
         WorkplaceWrapper myWorkplace = workplaces.get(workers.get(Thread.currentThread().getId()));
         if (!myWorkplace.queue.isEmpty()) {
             WorkplaceId workerToPass = myWorkplace.queue.remove(0);
-            System.out.println("oddaję sekcję krytyczną " + mutex + Thread.currentThread().getName());
             workplaces.get(workerToPass).waitForSwitch.release();
         }
         else if (myWorkplace.waitToEnter.getQueueLength() > 0) {

@@ -41,17 +41,11 @@ public class WorkplaceWrapper extends Workplace {
     private void prapareUse() {
         if (waitForPrev != null) {
             waitForPrev.countDown();
-            System.out.println("prev" + waitForPrev.toString() + Thread.currentThread().getName());
-            //await(waitForPrev);
         }
-        System.out.println("tu się wyjebał " + Thread.currentThread().getName());
         if (waitForNext != null) {
             waitForNext.countDown();
-            System.out.println("next" + waitForNext.toString() + Thread.currentThread().getName());
             await(waitForNext);
         }
-        System.out.println("jednak nie " + Thread.currentThread().getName());
-
     }
 
     public void use() {
