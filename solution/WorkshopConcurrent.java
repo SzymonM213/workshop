@@ -105,11 +105,10 @@ public class WorkshopConcurrent implements Workshop {
         workers.remove(Thread.currentThread().getId());
         workers.put(Thread.currentThread().getId(), wid);
         if (!isCycle) { // nie ma cyklu
-            //if (newWorkplace.occupied) {
-                CountDownLatch latch = new CountDownLatch(2);
-                oldWorkplace.waitForNext = latch;
-                newWorkplace.waitForPrev = latch;
-            //}
+            CountDownLatch latch = new CountDownLatch(2);
+            oldWorkplace.waitForNext = latch;
+            newWorkplace.waitForPrev = latch;
+            newWorkplace.occupied = true;
             if (!oldWorkplace.queue.isEmpty()) {
                 WorkplaceId workerToPass = oldWorkplace.queue.remove(0);
                 workplaces.get(workerToPass).waitForSwitch.release();
@@ -125,7 +124,6 @@ public class WorkshopConcurrent implements Workshop {
             isCycle = false;
             mutex.release();
         }
-        newWorkplace.occupied = true;
         return newWorkplace;
     }
 
