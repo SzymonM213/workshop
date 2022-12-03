@@ -105,11 +105,11 @@ public class WorkshopConcurrent implements Workshop {
         workers.remove(Thread.currentThread().getId());
         workers.put(Thread.currentThread().getId(), wid);
         if (!isCycle) { // nie ma cyklu
-            if (newWorkplace.occupied) {
+            //if (newWorkplace.occupied) {
                 CountDownLatch latch = new CountDownLatch(2);
                 oldWorkplace.waitForNext = latch;
                 newWorkplace.waitForPrev = latch;
-            }
+            //}
             if (!oldWorkplace.queue.isEmpty()) {
                 WorkplaceId workerToPass = oldWorkplace.queue.remove(0);
                 workplaces.get(workerToPass).waitForSwitch.release();
