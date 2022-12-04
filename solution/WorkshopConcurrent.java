@@ -8,13 +8,14 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class WorkshopConcurrent implements Workshop {
-    private volatile int population;
-    private final Map<WorkplaceId, WorkplaceWrapper> workplaces; // żeby móc cokolwiek zwrócić przy enter i switchTo
-    private final ConcurrentMap<WorkplaceId, WorkplaceId> transferWishes; // do szukania cyklu i wpuszczania wątków do stanowisk
-    private final Map<Long, WorkplaceId> workers;
+    private volatile int countLeavingWorkers;
+    private final Map<WorkplaceId, WorkplaceWrapper> workplaces;
+    private final ConcurrentMap<WorkplaceId, WorkplaceId> transferWishes; // key - where is the worker,
+                                                                          // value - where he wants to go
+    private final Map<Long, WorkplaceId> workers; // current workplace of all workers in the workshop
     private final Semaphore mutex;
     private final Semaphore populationLimit;
-    private volatile boolean isCycle;
+    private volatile boolean isCycle; // tells the awakened worker if he is part of a cycle
 
     public WorkshopConcurrent(Collection<Workplace> workplaces) {
         this.workplaces = new HashMap<>();
@@ -23,9 +24,9 @@ public class WorkshopConcurrent implements Workshop {
         }
         this.transferWishes = new ConcurrentHashMap<>();
         this.mutex = new Semaphore(1);
-        this.populationLimit = new Semaphore(2*this.workplaces.size(), true);
+        this.populationLimit = new Semaphore(2 * this.workplaces.size(), true);
         this.workers = new HashMap<>();
-        this.population = 2*this.workplaces.size();
+        this.countLeavingWorkers = 2 * this.workplaces.size();
         this.isCycle = false;
     }
 
@@ -43,8 +44,7 @@ public class WorkshopConcurrent implements Workshop {
         acquire(mutex);
         if (newWorkplace.occupied) {
             mutex.release();
-            acquire(newWorkplace.waitToEnter);
-            //acquire(mutex);
+            newWorkplace.waitToEnterAcquire();
         }
         newWorkplace.occupied = true;
         workers.put(Thread.currentThread().getId(), wid);
@@ -52,6 +52,7 @@ public class WorkshopConcurrent implements Workshop {
         return workplaces.get(wid);
     }
 
+    // returns the length of the cycle beginning from the start workplace, if there is no cycle returns 0
     private int cycleLength(WorkplaceId start) {
         int result = 1;
         WorkplaceId tmp = transferWishes.get(start);
@@ -63,9 +64,23 @@ public class WorkshopConcurrent implements Workshop {
         return 0;
     }
 
+    private void letSomebodyIn(WorkplaceWrapper workplace) {
+        if (!workplace.queue.isEmpty()) {
+            WorkplaceId workerToPass = workplace.queue.remove(0);
+            workplaces.get(workerToPass).waitForSwitchRelease();
+        }
+        else if (workplace.isSomebodyWaitingToEnter()) {
+            workplace.waitToEnterRelease();
+        }
+        else {
+            workplace.occupied = false;
+            mutex.release();
+        }
+    }
+
     public Workplace switchTo(WorkplaceId wid) {
         acquire(mutex);
-        int length = 0;
+        int length;
         WorkplaceWrapper newWorkplace = workplaces.get(wid);
         WorkplaceId oldId = workers.get(Thread.currentThread().getId());
         WorkplaceWrapper oldWorkplace = workplaces.get(oldId);
@@ -83,43 +98,34 @@ public class WorkshopConcurrent implements Workshop {
                 WorkplaceWrapper whereIAm = newWorkplace;
                 WorkplaceWrapper whereIGo;
                 newWorkplace.queue.remove(oldWorkplace.getId());
-                newWorkplace.waitForPrev = null;
-                newWorkplace.waitForNext = waitForCycle;
+                newWorkplace.setLetPrevWorkplaceUse(null);
+                newWorkplace.setWaitForPrevUser(waitForCycle);
+                // the worker who found a cycle wakes up all workers from it
                 while (whereIAm != oldWorkplace) {
                     whereIGo = workplaces.get(transferWishes.get(whereIAm.getId()));
                     whereIGo.queue.remove(whereIAm.getId());
-                    whereIGo.waitForPrev = null;
-                    whereIGo.waitForNext = waitForCycle;
-                    whereIAm.waitForSwitch.release(); //oddaje tego zjeba mutexa
+                    whereIGo.setLetPrevWorkplaceUse(null);
+                    whereIGo.setWaitForPrevUser(waitForCycle);
+                    whereIAm.waitForSwitchRelease();
                     whereIAm = whereIGo;
-                    acquire(mutex); // tu trzeba zamienic mutex na inny semafor cycle albo zabawa z isCycle
+                    acquire(mutex);
                     isCycle = true;
                 }
             }
             else {
                 mutex.release();
-                acquire(oldWorkplace.waitForSwitch);
+                oldWorkplace.waitForSwitchAcquire();
             }
             transferWishes.remove(oldId);
         }
         workers.remove(Thread.currentThread().getId());
         workers.put(Thread.currentThread().getId(), wid);
-        if (!isCycle) { // nie ma cyklu
+        if (!isCycle) {
             CountDownLatch latch = new CountDownLatch(2);
-            oldWorkplace.waitForNext = latch;
-            newWorkplace.waitForPrev = latch;
+            oldWorkplace.setWaitForPrevUser(latch);
+            newWorkplace.setLetPrevWorkplaceUse(latch);
             newWorkplace.occupied = true;
-            if (!oldWorkplace.queue.isEmpty()) {
-                WorkplaceId workerToPass = oldWorkplace.queue.remove(0);
-                workplaces.get(workerToPass).waitForSwitch.release();
-            }
-            else if (oldWorkplace.waitToEnter.getQueueLength() > 0) {
-                oldWorkplace.waitToEnter.release();
-            }
-            else {
-                oldWorkplace.occupied = false;
-                mutex.release();
-            }
+            letSomebodyIn(oldWorkplace);
         } else {
             isCycle = false;
             mutex.release();
@@ -129,25 +135,15 @@ public class WorkshopConcurrent implements Workshop {
 
     public void leave() {
         acquire(mutex);
-        workers.remove(Thread.currentThread());
-        population--;
-        if(population == 0) {
+        countLeavingWorkers--;
+        if(countLeavingWorkers == 0) {
             for (int i = 0; i < 2 * workplaces.size(); i++) {
                 populationLimit.release();
             }
-            population = 2 * workplaces.size();
+            countLeavingWorkers = 2 * workplaces.size();
         }
         WorkplaceWrapper myWorkplace = workplaces.get(workers.get(Thread.currentThread().getId()));
-        if (!myWorkplace.queue.isEmpty()) {
-            WorkplaceId workerToPass = myWorkplace.queue.remove(0);
-            workplaces.get(workerToPass).waitForSwitch.release();
-        }
-        else if (myWorkplace.waitToEnter.getQueueLength() > 0) {
-            myWorkplace.waitToEnter.release();
-        }
-        else {
-            myWorkplace.occupied = false;
-            mutex.release();
-        }
+        workers.remove(Thread.currentThread().getId());
+        letSomebodyIn(myWorkplace);
     }
 }
