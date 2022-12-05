@@ -1,3 +1,10 @@
+/*
+ * University of Warsaw
+ * Concurrent Programming Course 2022/2023
+ * Java Assignment
+ *
+ * Author: Szymon Mrozicki
+ */
 package cp2022.solution;
 
 import cp2022.base.Workplace;
@@ -23,6 +30,8 @@ public class WorkplaceWrapper extends Workplace {
         this.workplace = workplace;
         this.occupied = false;
         this.queue = new ArrayList<>();
+        this.waitForPrevUser = new CountDownLatch(0);
+        this.letPrevWorkplaceUse = new CountDownLatch(0);
         this.waitForSwitch = new Semaphore(0);
         this.waitToEnter = new Semaphore(0);
     }
@@ -70,13 +79,8 @@ public class WorkplaceWrapper extends Workplace {
     }
 
     public void use() {
-        if (letPrevWorkplaceUse != null) {
-            letPrevWorkplaceUse.countDown();
-        }
-        if (waitForPrevUser != null) {
-            waitForPrevUser.countDown();
-            await(waitForPrevUser); // waits for the next
-        }
+        letPrevWorkplaceUse.countDown();
+        await(waitForPrevUser); // waits for the previous user of the workplace
         workplace.use();
     }
 }

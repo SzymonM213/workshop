@@ -3,7 +3,7 @@
  * Concurrent Programming Course 2022/2023
  * Java Assignment
  *
- * Author: Konrad Iwanicki (iwanicki@mimuw.edu.pl)
+ * Author: Konrad Iwanicki (iwanicki@mimuw.edu.pl), Szymon Mrozicki
  */
 package cp2022.solution;
 

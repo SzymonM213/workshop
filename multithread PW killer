@@ -1,0 +1,29 @@
+#!/bin/bash
+mkdir logs
+
+function run_test() {
+	echo starting $1
+	find . -type f -name "*.java" | xargs javac -cp ./ -d ./out$1/
+
+	while true; do
+		java -cp ./out$1/ ../tests.Main > logs/$1.out 2> logs/$1.err
+
+		if [ $? -ne 0 ]; then
+				echo ERRORED TESTS! on thread $1
+				exit 1
+		fi
+		if [ -s logs/$1.err ]; then
+			echo Non empty stderr! on thread $1
+			exit 1
+		fi
+	done
+}
+
+function make_n(){
+	if [ $1 -ne 1 ]; then
+		make_n $(($1 - 1)) &
+	fi
+	run_test $1
+}
+
+make_n $1

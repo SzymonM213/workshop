@@ -1,3 +1,10 @@
+/*
+ * University of Warsaw
+ * Concurrent Programming Course 2022/2023
+ * Java Assignment
+ *
+ * Author: Szymon Mrozicki
+ */
 package cp2022.solution;
 
 import cp2022.base.Workplace;
@@ -15,6 +22,7 @@ public class WorkshopConcurrent implements Workshop {
     private final Map<Long, WorkplaceId> workers; // current workplace of all workers in the workshop
     private final Semaphore mutex;
     private final Semaphore populationLimit;
+    private Semaphore cycle;
     private volatile boolean isCycle; // tells the awakened worker if he is part of a cycle
 
     public WorkshopConcurrent(Collection<Workplace> workplaces) {
@@ -80,7 +88,7 @@ public class WorkshopConcurrent implements Workshop {
 
     public Workplace switchTo(WorkplaceId wid) {
         acquire(mutex);
-        int length;
+        int length = 0;
         WorkplaceWrapper newWorkplace = workplaces.get(wid);
         WorkplaceId oldId = workers.get(Thread.currentThread().getId());
         WorkplaceWrapper oldWorkplace = workplaces.get(oldId);
@@ -98,17 +106,18 @@ public class WorkshopConcurrent implements Workshop {
                 WorkplaceWrapper whereIAm = newWorkplace;
                 WorkplaceWrapper whereIGo;
                 newWorkplace.queue.remove(oldWorkplace.getId());
-                newWorkplace.setLetPrevWorkplaceUse(null);
+                newWorkplace.setLetPrevWorkplaceUse(waitForCycle);
                 newWorkplace.setWaitForPrevUser(waitForCycle);
+                cycle = new Semaphore(0);
                 // the worker who found a cycle wakes up all workers from it
                 while (whereIAm != oldWorkplace) {
                     whereIGo = workplaces.get(transferWishes.get(whereIAm.getId()));
                     whereIGo.queue.remove(whereIAm.getId());
-                    whereIGo.setLetPrevWorkplaceUse(null);
+                    whereIGo.setLetPrevWorkplaceUse(waitForCycle);
                     whereIGo.setWaitForPrevUser(waitForCycle);
                     whereIAm.waitForSwitchRelease();
                     whereIAm = whereIGo;
-                    acquire(mutex);
+                    acquire(cycle);
                     isCycle = true;
                 }
             }
@@ -121,14 +130,17 @@ public class WorkshopConcurrent implements Workshop {
         workers.remove(Thread.currentThread().getId());
         workers.put(Thread.currentThread().getId(), wid);
         if (!isCycle) {
-            CountDownLatch latch = new CountDownLatch(2);
+            CountDownLatch latch = new CountDownLatch(1);
             oldWorkplace.setWaitForPrevUser(latch);
             newWorkplace.setLetPrevWorkplaceUse(latch);
             newWorkplace.occupied = true;
             letSomebodyIn(oldWorkplace);
         } else {
-            isCycle = false;
-            mutex.release();
+            if (length > 0) {
+                isCycle = false;
+                mutex.release();
+            }
+            else cycle.release();
         }
         return newWorkplace;
     }
